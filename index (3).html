@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="th">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ศูนย์สั่งการกู้ชีพร่มไทร v4.0 (Multi-User Edition)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+        #map { height: 350px; width: 100%; border-radius: 12px; z-index: 1; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+ </head>
+ <body class="bg-slate-900 text-slate-100 min-h-screen pb-24 font-sans selection:bg-green-600 selection:text-white">
+  <!-- 1. หน้าเข้าสู่ระบบ (Login) -->
+  <div id="login" class="p-6 max-w-sm mx-auto mt-24 bg-slate-800 rounded-2xl shadow-2xl text-center border border-slate-700">
+   <div class="text-5xl mb-3 drop-shadow-md">🚨</div>
+   <h2 class="text-2xl font-bold mb-1 text-emerald-400">ศูนย์สั่งการกู้ชีพร่มไทร</h2>
+   <p class="text-xs text-slate-400 mb-6 tracking-wide uppercase font-medium">ระบบควบคุมปฏิบัติการส่วนกลาง</p>
+   <div class="text-left mb-4">
+    <label class="block text-xs text-slate-400 mb-1">เลือกประเภทผู้ใช้งาน</label> <select id="user-role" class="w-full p-3 rounded-xl bg-slate-950 border border-slate-600 text-white focus:outline-none focus:border-emerald-500"> <option value="member">📡 ลูกข่าย / อาสาสมัครในพื้นที่</option> <option value="admin">👑 แอดมิน / ศูนย์สั่งการใหญ่</option> </select>
+   </div>
+   <div class="text-left mb-4">
+    <label class="block text-xs text-slate-400 mb-1">กรอกรหัสผ่านเข้าใช้งาน</label> <input type="password" id="pass" placeholder="ลูกข่าย: romsai | แอดมิน: admin1669" class="border border-slate-600 bg-slate-950 p-3 w-full rounded-xl text-center text-lg focus:outline-none focus:border-emerald-500 text-white transition-all">
+   </div>
+   <button onclick="checkAuth()" class="bg-emerald-600 hover:bg-emerald-500 font-bold p-3 w-full rounded-xl text-lg shadow-lg active:scale-95 transition-all text-white">เข้าสู่ระบบปฏิบัติการ</button>
+   <p id="err" class="text-rose-400 text-sm mt-3 hidden font-bold animate-pulse">❌ รหัสผ่านไม่ถูกต้องสำหรับประเภทผู้ใช้ที่เลือก</p>
+  </div>
+  <!-- 2. หน้าหลักแอปพลิเคชัน (Main App) -->
+  <div id="main" class="hidden">
+   <!-- แถบหัวข้อบนสุด (จะเปลี่ยนข้อความตามสิทธิ์อัตโนมัติ) -->
+   <header id="app-header" class="p-4 font-bold text-center text-lg shadow-xl border-b sticky top-0 z-50 flex items-center justify-between">
+    <span id="header-title" class="flex items-center gap-2">🚨 ระบบปฏิบัติการร่มไทร</span> <span id="gps-status" class="text-xs px-2 py-1 rounded-full border">GPS: กำลังตรวจสอบ</span>
+   </header>
+   <main class="p-4 max-w-md mx-auto space-y-4">
+    <!-- ปุ่มด่วน แจ้งเหตุ / ว.7 -->
+    <div class="grid grid-cols-2 gap-3">
+     <a href="tel:1669" class="bg-amber-600 hover:bg-amber-500 text-white p-4 rounded-xl text-center font-bold text-lg shadow-md block active:scale-95 transition-all"> 📞 โทรสายด่วน 1669 </a>
+     <button onclick="triggerV7()" class="bg-rose-600 hover:bg-rose-500 text-white p-4 rounded-xl font-bold text-lg shadow-md active:scale-95 transition-all">🚨 ขอกำลังเสริม (ว.7)</button>
+    </div>
+    <!-- เมนูแท็บสลับหน้าการทำงาน -->
+    <div class="grid grid-cols-3 bg-slate-950 p-1 rounded-xl border border-slate-800">
+     <button onclick="switchTab('tab-map')" id="btn-tab-map" class="py-2 text-sm font-medium rounded-lg text-emerald-400 bg-slate-800">📍 หน้าแผนที่</button>
+     <button onclick="switchTab('tab-patient')" id="btn-tab-patient" class="py-2 text-sm font-medium rounded-lg text-slate-400">📝 ข้อมูลเคส</button>
+     <button onclick="switchTab('tab-radio')" id="btn-tab-radio" class="py-2 text-sm font-medium rounded-lg text-slate-400">📻 วิทยุ ว.</button>
+    </div>
+    <!-- แท็บที่ 1: แผนที่ (สิทธิ์ต่างกัน ฟังก์ชันต่างกัน) -->
+    <div id="tab-map" class="tab-content active space-y-3">
+     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm">
+      <div class="flex justify-between items-center mb-2">
+       <span id="map-title" class="font-bold text-slate-200">📍 แผนที่พิกัดปฏิบัติการ</span>
+       <button onclick="getLocation()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3 py-1.5 rounded-lg text-white font-bold transition-colors">🔄 ดึง GPS ปัจจุบัน</button>
+      </div>
+      <!-- ข้อความแนะนำสิทธิ์เฉพาะ Admin -->
+      <p id="admin-map-tip" class="text-[11px] text-amber-400 mb-2 hidden">💡 สิทธิ์แอดมิน: คุณสามารถคลิกบนแผนที่เพื่อล็อกพิกัดจุดเกิดเหตุให้ลูกข่ายเห็นได้ทันที</p>
+      <div id="map"></div>
+      <div class="mt-2 text-xs text-slate-400 bg-slate-900 p-2 rounded-lg border border-slate-700 break-all" id="coord-display">พิกัดเริ่มต้น: อ.ไพศาลี นครสวรรค์</div>
+     </div>
+    </div>
+    <!-- แท็บที่ 2: ฟอร์มข้อมูลผู้ป่วย (Admin แก้ไขได้ตลอดเวลา / ลูกข่ายบันทึกได้อย่างเดียว) -->
+    <div id="tab-patient" class="tab-content space-y-3">
+     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm space-y-3">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-1">
+       <h3 class="font-bold text-emerald-400" id="form-title">📝 บันทึกรับเคสเหตุผู้บาดเจ็บ</h3>
+       <span id="form-mode" class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded">สิทธิ์: ลูกข่ายทั่วไป</span>
+      </div>
+      <div>
+       <label class="block text-xs text-slate-400 mb-1">ชื่อ-สกุล / ลักษณะผู้บาดเจ็บ</label> <input type="text" id="p-name" placeholder="ระบุชื่อ หรือ เพศ/อายุคร่าวๆ" class="w-full p-2 text-sm rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+       <div>
+        <label class="block text-xs text-slate-400 mb-1">อาการสำคัญ</label> <input type="text" id="p-symptom" placeholder="เช่น หมดสติ, ตกจากที่สูง" class="w-full p-2 text-sm rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500">
+       </div>
+       <div>
+        <label class="block text-xs text-slate-400 mb-1">สัญญาณชีพ (BP/PR)</label> <input type="text" id="p-vitals" placeholder="เช่น 120/80" class="w-full p-2 text-sm rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500">
+       </div>
+      </div>
+      <div>
+       <label class="block text-xs text-slate-400 mb-1">โรงพยาบาลนำส่งปลายทาง</label> <select id="p-hospital" class="w-full p-2 text-sm rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"> <option value="รพ.ไพศาลี">🏥 รพ.ไพศาลี</option> <option value="รพ.สวรรค์ประชารักษ์">🏥 รพ.สวรรค์ประชารักษ์</option> <option value="รพ.ปากน้ำโพ">🏥 รพ.ปากน้ำโพ</option> </select>
+      </div>
+      <button onclick="savePatientData()" id="btn-submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-2.5 rounded-lg text-sm transition-colors shadow">💾 บันทึกและส่งข้อมูลเข้าศูนย์</button>
+     </div>
+     <!-- บอร์ดแสดงข้อมูลเคสล่าสุด -->
+     <div id="patient-log-box" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm hidden">
+      <div class="flex justify-between items-center mb-2">
+       <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">📋 เคสปฏิบัติการล่าสุดบนระบบ</h4>
+       <!-- ปุ่มแก้ไขเคส จะโผล่มาเฉพาะตอนล็อกอินเป็น Admin เท่านั้น -->
+       <button onclick="enableEditMode()" id="admin-edit-btn" class="text-xs text-amber-400 hover:underline hidden items-center gap-1">✏️ แก้ไขเคสนี้ (สิทธิ์แอดมิน)</button>
+      </div>
+      <div id="patient-display" class="text-sm bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-1 text-slate-200"></div>
+     </div>
+    </div>
+    <!-- แท็บที่ 3: ระบบวิทยุและควบคุมบล็อกประวัติ ว. -->
+    <div id="tab-radio" class="tab-content space-y-3">
+     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-1">
+       <h3 class="font-bold text-emerald-400" id="radio-title">📻 เครือข่ายวิทยุสื่อสาร ว.</h3>
+       <!-- ปุ่มล้างประวัติ โผล่มาเฉพาะแอดมิน -->
+       <button onclick="clearRadioLogs()" id="admin-clear-radio" class="text-[11px] bg-rose-950 text-rose-400 border border-rose-800 px-2 py-0.5 rounded hover:bg-rose-900 hidden">ล้างประวัติ</button>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+       <button onclick="playRadioCode('ว.4', 'ปฏิบัติหน้าที่เหตุเหตุทั่วไป')" class="bg-slate-700 hover:bg-slate-600 p-3 rounded-xl border border-slate-600 text-left active:scale-95 transition-all">
+        <div class="font-bold text-sm text-amber-400">ว.4</div>
+        <div class="text-xs text-slate-400">ปฏิบัติหน้าที่</div>
+       </button>
+       <button onclick="playRadioCode('ว.15', 'ถึงที่เกิดเหตุแล้ว')" class="bg-slate-700 hover:bg-slate-600 p-3 rounded-xl border border-slate-600 text-left active:scale-95 transition-all">
+        <div class="font-bold text-sm text-cyan-400">ว.15</div>
+        <div class="text-xs text-slate-400">ถึงที่เกิดเหตุ</div>
+       </button>
+       <button onclick="playRadioCode('ว.25', 'นำส่งสถานพยาบาล')" class="bg-slate-700 hover:bg-slate-600 p-3 rounded-xl border border-slate-600 text-left active:scale-95 transition-all">
+        <div class="font-bold text-sm text-purple-400">ว.25</div>
+        <div class="text-xs text-slate-400">นำส่ง รพ.</div>
+       </button>
+       <button onclick="playRadioCode('ว.24', 'เสร็จสิ้นภารกิจ ว.4 ทราบแล้วเปลี่ยน')" class="bg-slate-700 hover:bg-slate-600 p-3 rounded-xl border border-slate-600 text-left active:scale-95 transition-all">
+        <div class="font-bold text-sm text-emerald-400">ว.24</div>
+        <div class="text-xs text-slate-400">เสร็จสิ้นภารกิจ</div>
+       </button>
+      </div>
+      <div>
+       <div class="text-xs text-slate-400 font-bold mb-2">📟 ล็อกรายการรหัสวิทยุ:</div>
+       <div id="radio-log" class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 text-xs text-slate-300 h-28 overflow-y-auto space-y-1">
+        <div class="text-slate-500 text-center py-4">ยังไม่มีการส่งรหัสสัญญาณเสียง</div>
+       </div>
+      </div>
+     </div>
+    </div>
+   </main>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+        let mapInstance;
+        let userMarker;
+        let originalCoords = [15.6025, 100.6558];
+        let currentUserRole = 'member'; // สิทธิ์ผู้ใช้เริ่มต้น
+        let activeCaseData = null;
+
+        // ฟังก์ชันยืนยันสิทธิ์เข้าใช้งานตามบทบาท
+        function checkAuth() {
+            const selectedRole = document.getElementById('user-role').value;
+            const inputPass = document.getElementById('pass').value.trim();
+
+            if (selectedRole === 'admin' && inputPass === 'admin1669') {
+                currentUserRole = 'admin';
+                setupAdminUI();
+                enterApp();
+            } else if (selectedRole === 'member' && inputPass === 'romsai') {
+                currentUserRole = 'member';
+                setupMemberUI();
+                enterApp();
+            } else {
+                document.getElementById('err').classList.remove('hidden');
+            }
+        }
+
+        function enterApp() {
+            document.getElementById('login').classList.add('hidden');
+            document.getElementById('main').classList.remove('hidden');
+            initMap();
+            getLocation();
+        }
+
+        // ปรับเปลี่ยนหน้าตาและระดับสิทธิ์ให้เป็น Admin
+        function setupAdminUI() {
+            // ปรับสีธีมด้านบนเป็นสีทอง/ส้ม บ่งบอกสถานะแอดมินสูงสุด
+            const header = document.getElementById('app-header');
+            header.className = "bg-slate-950 text-amber-400 p-4 font-bold text-center text-lg shadow-xl border-b border-amber-900/40 sticky top-0 z-50 flex items-center justify-between";
+            document.getElementById('header-title').innerHTML = "⚡ ศูนย์ควบคุม (ADMIN)";
+            
+            const gpsStatus = document.getElementById('gps-status');
+            gpsStatus.innerText = "MODE: ADMIN";
+            gpsStatus.className = "text-xs px-2 py-1 bg-amber-950 text-amber-400 rounded-full border border-amber-800 animate-pulse";
+            
+            // เปิดฟังก์ชันแผนที่ของแอดมิน (คลิกย้ายตำแหน่งเหตุได้)
+            document.getElementById('admin-map-tip').classList.remove('hidden');
+            document.getElementById('map-title').innerText = "📍 แผนที่สั่งการเป้าหมาย";
+
+            // ปรับฟอร์มจัดการเคสให้แก้ไขได้
+            document.getElementById('form-title').className = "font-bold text-amber-400";
+            document.getElementById('form-mode').innerText = "สิทธิ์: ผู้ดูแลระบบ (แก้ไขได้)";
+            document.getElementById('form-mode').className = "text-[10px] bg-amber-950 text-amber-400 border border-amber-800 px-2 py-0.5 rounded";
+            document.getElementById('btn-submit').className = "w-full bg-amber-600 hover:bg-amber-500 text-white font-bold p-2.5 rounded-lg text-sm transition-colors shadow";
+            document.getElementById('btn-submit').innerText = "💾 บันทึกควบคุมเข้าศูนย์";
+            
+            // เปิดปุ่มแก้ไขเคสและปุ่มล้างล็อกวิทยุ ว.
+            document.getElementById('admin-edit-btn').style.display = 'flex';
+            document.getElementById('admin-clear-radio').classList.remove('hidden');
+            document.getElementById('radio-title').className = "font-bold text-amber-400";
+        }
+
+        // ปรับเปลี่ยนหน้าตาและระดับสิทธิ์ให้เป็น ลูกข่ายกู้ภัยทั่วไป
+        function setupMemberUI() {
+            const header = document.getElementById('app-header');
+            header.className = "bg-slate-950 text-emerald-400 p-4 font-bold text-center text-lg shadow-xl border-b border-emerald-900/40 sticky top-0 z-50 flex items-center justify-between";
+            document.getElementById('header-title').innerHTML = "📡 ห้องลูกข่ายร่มไทร";
+            
+            const gpsStatus = document.getElementById('gps-status');
+            gpsStatus.innerText = "MODE: MEMBER";
+            gpsStatus.className = "text-xs px-2 py-1 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-800";
+            
+            // ซ่อนฟังก์ชันขั้นสูงของแอดมินออกทั้งหมด
+            document.getElementById('admin-map-tip').classList.add('hidden');
+            document.getElementById('admin-edit-btn').style.display = 'none';
+            document.getElementById('admin-clear-radio').classList.add('hidden');
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+
+            document.querySelectorAll('div > button[id^="btn-tab-"]').forEach(btn => {
+                btn.classList.remove('bg-slate-800', 'text-amber-400', 'text-emerald-400');
+                btn.classList.add('text-slate-400');
+            });
+            
+            const activeBtn = document.getElementById('btn-' + tabId);
+            activeBtn.classList.remove('text-slate-400');
+            if(currentUserRole === 'admin') {
+                activeBtn.classList.add('bg-slate-800', 'text-amber-400');
+            } else {
+                activeBtn.classList.add('bg-slate-800', 'text-emerald-400');
+            }
+
+            if (tabId === 'tab-map' && mapInstance) {
+                setTimeout(() => { mapInstance.invalidateSize(); }, 150);
+            }
+        }
+
+        function initMap() {
+            if (mapInstance) return;
+
+            mapInstance = L.map('map').setView(originalCoords, 13);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap'
+            }).addTo(mapInstance);
+            
+            L.marker(originalCoords).addTo(mapInstance).bindPopup("<b>📌 จุดสแตนด์บายกู้ชีพร่มไทร</b><br>อ.ไพศาลี").openPopup();
+            L.marker([15.6080, 100.6620]).addTo(mapInstance).bindPopup("<b>🏥 รพ.ไพศาลี</b>");
+
+            // ความสามารถเฉพาะ Admin: จิ้มจุดบนแผนที่เพื่อบังคับล็อกตำแหน่งเป้าหมายเหตุได้เลย
+            mapInstance.on('click', function(e) {
+                if (currentUserRole !== 'admin') return; // ลูกข่ายทั่วไปไม่มีสิทธิ์คลิกย้ายหมุดเหตุ
+                
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                
+                document.getElementById('coord-display').innerHTML = `<b>⚡ พิกัดเหตุที่แอดมินล็อกสั่งการ:</b> ละติจูด ${lat.toFixed(5)}, ลองจิจูด ${lng.toFixed(5)}`;
+                
+                if (userMarker) {
+                    userMarker.setLatLng([lat, lng]);
+                } else {
+                    createUserMarker(lat, lng);
+                }
+                userMarker.bindPopup("<b>🎯 เป้าหมายเหตุฉุกเฉิน (แอดมินกำหนด)</b>").openPopup();
+            });
+
+            setTimeout(() => { mapInstance.invalidateSize(); }, 200);
+        }
+
+        function createUserMarker(lat, lng) {
+            userMarker = L.marker([lat, lng], {
+                icon: L.icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41],
+                    popupAnchor: [1, -34],
+                    shadowSize: [41, 41]
+                })
+            }).addTo(mapInstance);
+        }
+
+        function getLocation() {
+            const displayTag = document.getElementById('coord-display');
+            if (!navigator.geolocation) return;
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    displayTag.innerHTML = `<b>พิกัดปัจจุบันเครื่องนี้:</b> ละติจูด ${lat.toFixed(5)}, ลองจิจูด ${lng.toFixed(5)}`;
+
+                    if (mapInstance) {
+                        mapInstance.setView([lat, lng], 15);
+                        if (userMarker) {
+                            userMarker.setLatLng([lat, lng]);
+                        } else {
+                            createUserMarker(lat, lng);
+                        }
+                        userMarker.bindPopup(`<b>🚨 ตำแหน่งปฏิบัติงาน (${currentUserRole === 'admin' ? 'แอดมิน' : 'ลูกข่าย'})</b>`).openPopup();
+                        mapInstance.invalidateSize();
+                    }
+                },
+                () => { console.log("GPS Location Access Denied or Error"); },
+                { enableHighAccuracy: true, timeout: 8000 }
+            );
+        }
+
+        function triggerV7() {
+            const prefix = currentUserRole === 'admin' ? '[ศูนย์ใหญ่สั่งการ]' : '[ลูกข่ายขอกำลังเสริม]';
+            alert(`🚨 ${prefix} แจ้งเหตุ ว.7 ขอกำลังเสริมเร่งด่วน พิกัดถูกแชร์แล้ว!`);
+            playRadioCode('แจ้งเหตุ ว. 7', 'ต้องการกำลังปฏิบัติการสนับสนุนด่วน ณ พิกัดปัจจุบัน ทราบแล้วเปลี่ยน');
+        }
+
+        function savePatientData() {
+            const name = document.getElementById('p-name').value.trim();
+            const symptom = document.getElementById('p-symptom').value.trim();
+            const vitals = document.getElementById('p-vitals').value.trim();
+            const hosp = document.getElementById('p-hospital').value;
+
+            if(!name || !symptom) {
+                alert('⚠️ กรุณากรอกชื่อและอาการผู้บาดเจ็บให้ครบถ้วน!');
+                return;
+            }
+
+            activeCaseData = { name, symptom, vitals, hosp };
+
+            const logBox = document.getElementById('patient-log-box');
+            const display = document.getElementById('patient-display');
+
+            logBox.classList.remove('hidden');
+            display.innerHTML = `
+                <div><b>👤 ผู้บาดเจ็บ/ผู้ป่วย:</b> <span>${name}</span></div>
+                <div><b>⚠️ อาการหลัก:</b> <span>${symptom}</span></div>
+                <div><b>🫀 สัญญาณชีพ:</b> <span>${vitals ? vitals : 'ไม่ระบุ'}</span></div>
+                <div><b>🏥 นำส่งต่อที่:</b> <span>${hosp}</span></div>
+            `;
+            
+            alert(currentUserRole === 'admin' ? '💾 แอดมินจัดการอัปเดตข้อมูลสำเร็จ!' : '💾 บันทึกเคสส่งข้อมูลเข้าศูนย์สำเร็จ!');
+            
+            // รีเซ็ตสถานะหน้าฟอร์ม (กรณีแอดมินเคยกดแก้ไขค้างไว้)
+            if(currentUserRole === 'admin') {
+                document.getElementById('form-mode').innerText = "สิทธิ์: ผู้ดูแลระบบ (แก้ไขได้)";
+                document.getElementById('form-mode').className = "text-[10px] bg-amber-950 text-amber-400 border border-amber-800 px-2 py-0.5 rounded";
+                document.getElementById('btn-submit').innerText = "💾 บันทึกควบคุมเข้าศูนย์";
+            }
+            
+            document.getElementById('p-name').value = '';
+            document.getElementById('p-symptom').value = '';
+            document.getElementById('p-vitals').value = '';
+        }
+
+        // ฟังก์ชัน Admin ดึงข้อมูลเคสเก่าขึ้นมาแก้ไขได้ตลอดเวลา
+        function enableEditMode() {
+            if (currentUserRole !== 'admin' || !activeCaseData) return;
+            
+            document.getElementById('p-name').value = activeCaseData.name;
+            document.getElementById('p-symptom').value = activeCaseData.symptom;
+            document.getElementById('p-vitals').value = activeCaseData.vitals;
+            document.getElementById('p-hospital').value = activeCaseData.hosp;
+
+            document.getElementById('form-mode').innerText = "โหมด: กำลังแก้ไขข้อมูลเคสเก่า";
+            document.getElementById('form-mode').className = "text-[10px] bg-rose-950 text-rose-400 border border-rose-800 px-2 py-0.5 rounded animate-pulse";
+            document.getElementById('btn-submit').innerText = "🆙 อัปเดตการแก้ไขสิทธิ์แอดมิน";
+            
+            alert('✏️ ดึงข้อมูลกลับเข้าฟอร์มสำเร็จ แอดมินทำการแก้ไขแล้วกดอัปเดตได้เลยครับ!');
+        }
+
+        function playRadioCode(code, textDetail) {
+            const prefixName = currentUserRole === 'admin' ? 'ศูนย์ร่มไทร' : 'ลูกข่ายร่มไทร';
+            const speechText = `${prefixName} แจ้ง ${code} ${textDetail}`;
+            
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(speechText);
+                utterance.lang = 'th-TH';
+                window.speechSynthesis.speak(utterance);
+            }
+
+            const radioLog = document.getElementById('radio-log');
+            const timeNow = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            
+            if (radioLog.innerHTML.includes('ยังไม่มีการส่งรหัส')) radioLog.innerHTML = '';
+
+            const newLog = document.createElement('div');
+            newLog.className = "pb-1 border-b border-slate-900 last:border-0 flex justify-between";
+            const codeColor = currentUserRole === 'admin' ? 'text-amber-400' : 'text-emerald-400';
+            newLog.innerHTML = `<span class="${codeColor} font-bold">[${timeNow}] ${code}</span> <span class="text-slate-400 text-right">${textDetail.substring(0,22)}...</span>`;
+            radioLog.insertBefore(newLog, radioLog.firstChild);
+        }
+
+        function clearRadioLogs() {
+            if (currentUserRole !== 'admin') return;
+            document.getElementById('radio-log').innerHTML = '<div class="text-slate-500 text-center py-4">ล้างประวัติโดยผู้ดูแลระบบแล้ว</div>';
+        }
+    </script>
+ </body>
+</html>
